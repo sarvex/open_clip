@@ -22,7 +22,7 @@ from .tokenizer import HFTokenizer, tokenize
 
 
 HF_HUB_PREFIX = 'hf-hub:'
-_MODEL_CONFIG_PATHS = [Path(__file__).parent / f"model_configs/"]
+_MODEL_CONFIG_PATHS = [Path(__file__).parent / "model_configs/"]
 _MODEL_CONFIGS = {}  # directory (model_name: config) of model architecture configs
 
 
@@ -48,7 +48,9 @@ def _rescan_model_configs():
             if all(a in model_cfg for a in ('embed_dim', 'vision_cfg', 'text_cfg')):
                 _MODEL_CONFIGS[cf.stem] = model_cfg
 
-    _MODEL_CONFIGS = {k: v for k, v in sorted(_MODEL_CONFIGS.items(), key=lambda x: _natural_key(x[0]))}
+    _MODEL_CONFIGS = dict(
+        sorted(_MODEL_CONFIGS.items(), key=lambda x: _natural_key(x[0]))
+    )
 
 
 _rescan_model_configs()  # initial populate of model config registry
@@ -76,12 +78,13 @@ def get_model_config(model_name):
 
 def get_tokenizer(model_name):
     if model_name.startswith(HF_HUB_PREFIX):
-        tokenizer = HFTokenizer(model_name[len(HF_HUB_PREFIX):])
-    else:
-        config = get_model_config(model_name)
-        tokenizer = HFTokenizer(
-            config['text_cfg']['hf_tokenizer_name']) if 'hf_tokenizer_name' in config['text_cfg'] else tokenize
-    return tokenizer
+        return HFTokenizer(model_name[len(HF_HUB_PREFIX):])
+    config = get_model_config(model_name)
+    return (
+        HFTokenizer(config['text_cfg']['hf_tokenizer_name'])
+        if 'hf_tokenizer_name' in config['text_cfg']
+        else tokenize
+    )
 
 
 def load_state_dict(checkpoint_path: str, map_location='cpu'):
@@ -101,8 +104,7 @@ def load_checkpoint(model, checkpoint_path, strict=True):
     if 'positional_embedding' in state_dict and not hasattr(model, 'positional_embedding'):
         state_dict = convert_to_custom_text_state_dict(state_dict)
     resize_pos_embed(state_dict, model)
-    incompatible_keys = model.load_state_dict(state_dict, strict=strict)
-    return incompatible_keys
+    return model.load_state_dict(state_dict, strict=strict)
 
 
 def create_model(
@@ -191,7 +193,7 @@ def create_model(
         else:
             model = CLIP(**model_cfg, cast_dtype=cast_dtype)
 
-        if precision in ("fp16", "bf16"):
+        if precision in {"fp16", "bf16"}:
             dtype = torch.float16 if 'fp16' in precision else torch.bfloat16
             # manual mixed precision that matches original OpenAI behaviour
             if is_timm_model:
@@ -208,7 +210,7 @@ def create_model(
             else:
                 model.to(device=device)
                 convert_weights_to_lp(model, dtype=dtype)
-        elif precision in ("pure_fp16", "pure_bf16"):
+        elif precision in {"pure_fp16", "pure_bf16"}:
             dtype = torch.float16 if 'fp16' in precision else torch.bfloat16
             model.to(device=device, dtype=dtype)
         else:

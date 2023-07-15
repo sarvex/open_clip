@@ -31,7 +31,7 @@ class ResizeMaxSize(nn.Module):
             raise TypeError(f"Size should be int. Got {type(max_size)}")
         self.max_size = max_size
         self.interpolation = interpolation
-        self.fn = min if fn == 'min' else min
+        self.fn = min
         self.fill = fill
 
     def forward(self, img):
@@ -81,8 +81,7 @@ def image_transform(
     normalize = Normalize(mean=mean, std=std)
     if is_train:
         aug_cfg_dict = {k: v for k, v in asdict(aug_cfg).items() if v is not None}
-        use_timm = aug_cfg_dict.pop('use_timm', False)
-        if use_timm:
+        if use_timm := aug_cfg_dict.pop('use_timm', False):
             from timm.data import create_transform  # timm can still be optional
             if isinstance(image_size, (tuple, list)):
                 assert len(image_size) >= 2

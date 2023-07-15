@@ -46,10 +46,7 @@ def postprocess_clip_output(model_out):
     }
 
 def unwrap_model(model):
-    if hasattr(model, 'module'):
-        return model.module
-    else:
-        return model
+    return model.module if hasattr(model, 'module') else model
 
 
 def backward(total_loss, scaler):
@@ -201,26 +198,19 @@ def train_one_epoch(model, data, loss, epoch, optimizer, scaler, scheduler, dist
             samples_per_second = args.accum_freq * args.batch_size * args.world_size / batch_time_m.val
             samples_per_second_per_gpu = args.accum_freq * args.batch_size / batch_time_m.val
             logging.info(
-                f"Train Epoch: {epoch} [{num_samples:>{sample_digits}}/{samples_per_epoch} ({percent_complete:.0f}%)] "
-                f"Data (t): {data_time_m.avg:.3f} "
-                f"Batch (t): {batch_time_m.avg:.3f}, {samples_per_second:#g}/s, {samples_per_second_per_gpu:#g}/s/gpu "
-                f"LR: {optimizer.param_groups[0]['lr']:5f} "
-                f"Logit Scale: {logit_scale_scalar:.3f} " + loss_log
+                f"Train Epoch: {epoch} [{num_samples:>{sample_digits}}/{samples_per_epoch} ({percent_complete:.0f}%)] Data (t): {data_time_m.avg:.3f} Batch (t): {batch_time_m.avg:.3f}, {samples_per_second:#g}/s, {samples_per_second_per_gpu:#g}/s/gpu LR: {optimizer.param_groups[0]['lr']:5f} Logit Scale: {logit_scale_scalar:.3f} {loss_log}"
             )
 
-            # Save train loss / etc. Using non avg meter values as loggers have their own smoothing
             log_data = {
                 "data_time": data_time_m.val,
                 "batch_time": batch_time_m.val,
                 "samples_per_second": samples_per_second,
                 "samples_per_second_per_gpu": samples_per_second_per_gpu,
                 "scale": logit_scale_scalar,
-                "lr": optimizer.param_groups[0]["lr"]
-            }            
-            log_data.update({name:val.val for name,val in losses_m.items()})
-
+                "lr": optimizer.param_groups[0]["lr"],
+            } | {name: val.val for name, val in losses_m.items()}
             for name, val in log_data.items():
-                name = "train/" + name
+                name = f"train/{name}"
                 if tb_writer is not None:
                     tb_writer.add_scalar(name, val, step)
                 if args.wandb:
@@ -241,7 +231,7 @@ def evaluate(model, data, epoch, args, tb_writer=None):
     model.eval()
 
     zero_shot_metrics = zero_shot_eval(model, data, epoch, args)
-    metrics.update(zero_shot_metrics)
+    metrics |= zero_shot_metrics
 
     autocast = get_autocast(args.precision)
     input_dtype = get_input_dtype(args.precision)
@@ -307,7 +297,7 @@ def evaluate(model, data, epoch, args, tb_writer=None):
             )
             if gen_loss is not None:
                 gen_loss = cumulative_gen_loss / num_samples
-                metrics.update({"val_generative_loss": gen_loss.item()})
+                metrics["val_generative_loss"] = gen_loss.item()
 
     if not metrics:
         return metrics

@@ -107,11 +107,7 @@ class Attention(nn.Module):
 
         # keeping in_proj in this form (instead of nn.Linear) to match weight scheme of original
         self.in_proj_weight = nn.Parameter(torch.randn((dim * 3, dim)) * self.scale)
-        if qkv_bias:
-            self.in_proj_bias = nn.Parameter(torch.zeros(dim * 3))
-        else:
-            self.in_proj_bias = None
-
+        self.in_proj_bias = nn.Parameter(torch.zeros(dim * 3)) if qkv_bias else None
         if self.scaled_cosine:
             self.logit_scale = nn.Parameter(torch.log(10 * torch.ones((num_heads, 1, 1))))
         else:
@@ -452,10 +448,7 @@ class VisionTransformer(nn.Module):
         self.transformer.grad_checkpointing = enable
 
     def _global_pool(self, x: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        if self.global_average_pool:
-            return x.mean(dim=1), x
-        else:
-            return x[:, 0], x[:, 1:]
+        return (x.mean(dim=1), x) if self.global_average_pool else (x[:, 0], x[:, 1:])
 
     def forward(self, x: torch.Tensor):
 
@@ -497,10 +490,7 @@ class VisionTransformer(nn.Module):
         if self.proj is not None:
             pooled = pooled @ self.proj
 
-        if self.output_tokens:
-            return pooled, tokens
-        
-        return pooled
+        return (pooled, tokens) if self.output_tokens else pooled
 
 
 class TextTransformer(nn.Module):
@@ -625,10 +615,7 @@ class TextTransformer(nn.Module):
         if self.text_projection is not None:
             pooled = pooled @ self.text_projection
 
-        if self.output_tokens:
-            return pooled, tokens
-
-        return pooled
+        return (pooled, tokens) if self.output_tokens else pooled
 
 
 class MultimodalTransformer(Transformer):

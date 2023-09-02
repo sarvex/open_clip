@@ -76,9 +76,9 @@ def get_cast_dtype(precision: str):
 
 def get_input_dtype(precision: str):
     input_dtype = None
-    if precision in ('bf16', 'pure_bf16'):
+    if precision in {'bf16', 'pure_bf16'}:
         input_dtype = torch.bfloat16
-    elif precision in ('fp16', 'pure_fp16'):
+    elif precision in {'fp16', 'pure_fp16'}:
         input_dtype = torch.float16
     return input_dtype
 
@@ -98,7 +98,7 @@ def _build_vision_tower(
     act_layer = QuickGELU if quick_gelu else nn.GELU
 
     if vision_cfg.timm_model_name:
-        visual = TimmModel(
+        return TimmModel(
             vision_cfg.timm_model_name,
             pretrained=vision_cfg.timm_model_pretrained,
             pool=vision_cfg.timm_pool,
@@ -106,13 +106,15 @@ def _build_vision_tower(
             proj_bias=vision_cfg.timm_proj_bias,
             drop=vision_cfg.timm_drop,
             drop_path=vision_cfg.timm_drop_path,
-            patch_drop=vision_cfg.patch_dropout if vision_cfg.patch_dropout > 0 else None,
+            patch_drop=vision_cfg.patch_dropout
+            if vision_cfg.patch_dropout > 0
+            else None,
             embed_dim=embed_dim,
             image_size=vision_cfg.image_size,
         )
     elif isinstance(vision_cfg.layers, (tuple, list)):
         vision_heads = vision_cfg.width * 32 // vision_cfg.head_width
-        visual = ModifiedResNet(
+        return ModifiedResNet(
             layers=vision_cfg.layers,
             output_dim=embed_dim,
             heads=vision_heads,
@@ -122,7 +124,7 @@ def _build_vision_tower(
     else:
         vision_heads = vision_cfg.width // vision_cfg.head_width
         norm_layer = LayerNormFp32 if cast_dtype in (torch.float16, torch.bfloat16) else LayerNorm
-        visual = VisionTransformer(
+        return VisionTransformer(
             image_size=vision_cfg.image_size,
             patch_size=vision_cfg.patch_size,
             width=vision_cfg.width,
@@ -142,8 +144,6 @@ def _build_vision_tower(
             norm_layer=norm_layer,
         )
 
-    return visual
-
 
 def _build_text_tower(
         embed_dim: int,
@@ -155,7 +155,7 @@ def _build_text_tower(
         text_cfg = CLIPTextCfg(**text_cfg)
 
     if text_cfg.hf_model_name:
-        text = HFTextEncoder(
+        return HFTextEncoder(
             text_cfg.hf_model_name,
             output_dim=embed_dim,
             proj=text_cfg.proj,
@@ -163,25 +163,23 @@ def _build_text_tower(
             pretrained=text_cfg.hf_model_pretrained,
             output_tokens=text_cfg.output_tokens,
         )
-    else:
-        act_layer = QuickGELU if quick_gelu else nn.GELU
-        norm_layer = LayerNormFp32 if cast_dtype in (torch.float16, torch.bfloat16) else LayerNorm
+    act_layer = QuickGELU if quick_gelu else nn.GELU
+    norm_layer = LayerNormFp32 if cast_dtype in (torch.float16, torch.bfloat16) else LayerNorm
 
-        text = TextTransformer(
-            context_length=text_cfg.context_length,
-            vocab_size=text_cfg.vocab_size,
-            width=text_cfg.width,
-            heads=text_cfg.heads,
-            layers=text_cfg.layers,
-            ls_init_value=text_cfg.ls_init_value,
-            output_dim=embed_dim,
-            embed_cls=text_cfg.embed_cls,
-            output_tokens=text_cfg.output_tokens,
-            pad_id=text_cfg.pad_id,
-            act_layer=act_layer,
-            norm_layer=norm_layer,
-        )
-    return text
+    return TextTransformer(
+        context_length=text_cfg.context_length,
+        vocab_size=text_cfg.vocab_size,
+        width=text_cfg.width,
+        heads=text_cfg.heads,
+        layers=text_cfg.layers,
+        ls_init_value=text_cfg.ls_init_value,
+        output_dim=embed_dim,
+        embed_cls=text_cfg.embed_cls,
+        output_tokens=text_cfg.output_tokens,
+        pad_id=text_cfg.pad_id,
+        act_layer=act_layer,
+        norm_layer=norm_layer,
+    )
 
 
 class CLIP(nn.Module):
@@ -357,7 +355,7 @@ def convert_to_custom_text_state_dict(state_dict: dict):
                 'transformer',
                 'ln_final',
             )):
-                k = 'text.' + k
+                k = f'text.{k}'
             new_state_dict[k] = v
         return new_state_dict
     return state_dict
@@ -373,13 +371,27 @@ def build_model_from_openai_state_dict(
     if vit:
         vision_width = state_dict["visual.conv1.weight"].shape[0]
         vision_layers = len(
-            [k for k in state_dict.keys() if k.startswith("visual.") and k.endswith(".attn.in_proj_weight")])
+            [
+                k
+                for k in state_dict
+                if k.startswith("visual.")
+                and k.endswith(".attn.in_proj_weight")
+            ]
+        )
         vision_patch_size = state_dict["visual.conv1.weight"].shape[-1]
         grid_size = round((state_dict["visual.positional_embedding"].shape[0] - 1) ** 0.5)
         image_size = vision_patch_size * grid_size
     else:
         counts: list = [
-            len(set(k.split(".")[2] for k in state_dict if k.startswith(f"visual.layer{b}"))) for b in [1, 2, 3, 4]]
+            len(
+                {
+                    k.split(".")[2]
+                    for k in state_dict
+                    if k.startswith(f"visual.layer{b}")
+                }
+            )
+            for b in [1, 2, 3, 4]
+        ]
         vision_layers = tuple(counts)
         vision_width = state_dict["visual.layer1.0.conv1.weight"].shape[0]
         output_width = round((state_dict["visual.attnpool.positional_embedding"].shape[0] - 1) ** 0.5)
@@ -392,7 +404,13 @@ def build_model_from_openai_state_dict(
     vocab_size = state_dict["token_embedding.weight"].shape[0]
     transformer_width = state_dict["ln_final.weight"].shape[0]
     transformer_heads = transformer_width // 64
-    transformer_layers = len(set(k.split(".")[2] for k in state_dict if k.startswith(f"transformer.resblocks")))
+    transformer_layers = len(
+        {
+            k.split(".")[2]
+            for k in state_dict
+            if k.startswith("transformer.resblocks")
+        }
+    )
 
     vision_cfg = CLIPVisionCfg(
         layers=vision_layers,
